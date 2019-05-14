@@ -40,6 +40,7 @@ def fetch(id):
     cache[lru]["cacheCounter"] = cacheGeneralCounter
     cacheGeneralCounter += 1
 
+#need to do as on algo this only temp"
 def write(i):
     print("writing page cache from where i=" + str(i) + "page=" + str(cache[i]["page"]["id"]))
     page={}
