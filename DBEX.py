@@ -4,7 +4,6 @@ import json
 cacheGeneralCounter = 0
 cache=[{},{},{}]
 
-
 #create a empty Stable Storage
 def createStableStorage():
     for i in range(1,21):
@@ -39,6 +38,7 @@ def fetch(id):
     cache[lru]["page"]["status"] = 0
     cache[lru]["cacheCounter"] = cacheGeneralCounter
     cacheGeneralCounter += 1
+    return lru
 
 #need to do as on algo this only temp"
 def write(i):
@@ -62,10 +62,38 @@ def LRU():
             print("least used page is in cache pag i="+ str(i))
             return i
 
-checkPageInCache(5)
-fetch(5)
-fetch(6)
-fetch(7)
-fetch(8)
-checkPageInCache(5)
-checkPageInCache(8)
+def Update(id,length,offset,value):
+    global cache
+    global cacheGeneralCounter
+    print("checking if page on cache")
+    cached=checkPageInCache(id)
+    if(cached == -1):
+        print("page not on cache")
+        cached=fetch(id)
+        print("page is now on cache at i=" + str(cached))
+    else:
+        print("page on cache at i=" + str(cached))
+    print("change content and psn")
+    for i in range(offset,offset+length):
+        cache[cached]["page"]["content"][i]=value[i-offset]
+        cacheGeneralCounter+=1
+        cache[cached]["cacheCounter"]=cacheGeneralCounter
+    cache[cached]["page"]["psn"]+=1   
+    cache[cached]["page"]["status"]=1
+    print("update finished")
+
+
+
+#checkPageInCache(5)
+#fetch(5)
+#fetch(6)
+#fetch(7)
+#fetch(8)
+#checkPageInCache(5)
+#checkPageInCache(8)
+createStableStorage()
+Update(5,2,2,"aa")
+Update(6,2,2,"bb")
+Update(7,2,2,"cc")
+Update(5,2,3,"dd")
+Update(8,2,2,"ee")
