@@ -6,6 +6,8 @@ cache=[{},{},{}]
 logBuffer=[]
 line=0
 jumpToNextLine=0
+activetrans=[]
+sequence = 1
 #create a empty Stable Storage
 def createStableStorage():
     for i in range(1,21):
@@ -57,13 +59,31 @@ def flushByCacheLocation(i):
 def flush(pageid):
     for i in range(0,3):
         if(cache[i]["page"]["id"]==pageid):
-            flushByCacheLocation[i]
+            flushByCacheLocation(i)
             return
     printt("The cache has no page="+str(pageid))
     return
 
 def force():
     pass
+
+def commit():
+    pass
+
+def begin(tid):
+    global sequence
+    printt("adding trans=" + str(tid) + "activetrans")
+    activetrans.append({"tid": tid, "lsn": sequence})
+    logentry={"lsn": sequence, "actiontype":"begin", "tid": tid,"PreviousSN":None}
+    
+
+    printt("trans=" + str(tid)  + " is now in activeTrans\n" + 
+        "creating new log entry with " + str(logentry))
+    logBuffer.append(logentry)
+    sequence+=1
+    printt("begin finished")
+
+    
 
 #return the page of least recently used 
 def LRU():
@@ -77,13 +97,18 @@ def LRU():
             printt("least used page is in cache pag i="+ str(i))
             return i
 
-def write(id,length,offset,value):
+def write(tid,id,length,offset,value):
     global cache
     global cacheGeneralCounter
+    global activetrans
+    printt("checking if the trans=" + str(tid) +  " is in active trans")
+    if(checkLSNofTrans(tid)==-1):
+        printt("trans with tid=" + str(tid) + "not in activetrans, adding to active trans")
+        begin(tid)
+    printt(str(tid) + " is on activetrans")
     printt("checking if page on cache")
     cached=checkPageInCache(id)
-    if(cached
-     == -1):
+    if(cached == -1):
         printt("page not on cache")
         cached=fetch(id)
         printt("page is now on cache at i=" + str(cached))
@@ -99,6 +124,12 @@ def write(id,length,offset,value):
     logEntry={}
     #logEntry["LSN"]=
     printt("write finished")
+#get trans id and return the last sequence number of it, -1 if there is no tid)
+def checkLSNofTrans(tid):
+    for tran in activetrans:
+        if(tran["tid"]==tid):
+            return tran["lsn"]
+    return -1
 
 def printt(string=None):
     global jumpToNextLine
@@ -128,7 +159,8 @@ def printCachePage(pageid):
     printt("there is no page on cache, with id="+str(pageid))
     return
     
-
+def createLogEntry():
+    pass
 
 #checkPageInCache(5)
 #fetch(5)
@@ -139,12 +171,12 @@ def printCachePage(pageid):
 #checkPageInCache(8)
 createStableStorage()
 line=1
-write(5,2,2,"aa")
+write(1,5,2,2,"aa")
 line=2
-write(6,2,2,"bb")
+write(2,6,2,2,"bb")
 line=3
-write(7,2,2,"cc")
+write(2,7,2,2,"cc")
 line=4
-write(5,2,3,"dd")
+write(1,2,3,"dd")
 line=5
-write(8,2,2,"ee")
+write(3,2,2,"ee")
