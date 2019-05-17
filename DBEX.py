@@ -47,15 +47,32 @@ def fetch(id):
     cacheGeneralCounter += 1
     return lru
 
+def checkForLogEntry(pageid):
+    for log in logBuffer:
+        try: 
+            x=log["page"]
+            if(x==pageid):
+                return True
+        except:
+            pass
+    return False
+
 #need to do as on algo this only temp"
 def flushByCacheLocation(i):
-    printt("writing page cache from where i=" + str(i) + "page=" + str(cache[i]["page"]["id"]))
+    global cache
+    printt("checking if the page has a relevant log entry")
+    if(checkForLogEntry(cache[i]["page"])==True):
+        printt("there is a log with relavnt pageid0, forcing")
+        force()
+    printt("writing page to stable storage")
     page={}
     page["id"] = cache[i]["page"]["id"]
     page["psn"] = cache[i]["page"]["psn"]
     page["content"]=cache[i]["page"]["content"]
+    cache[i]["page"]["status"] == "clean"
+    
     json.dump(page, open('./stablestorage/'+ str(cache[i]["page"]["id"]),"w+"))
-
+    printt("writing was completed")
 def flush(pageid):
     for i in range(0,3):
         if(cache[i]["page"]["id"]==pageid):
@@ -65,7 +82,15 @@ def flush(pageid):
     return
 
 def force():
-    pass
+    global logBuffer
+    printt("start forcing, writing logBuffer into stable log")
+    for log in logBuffer:
+        printt("writing log entry with params " + log)
+        json.dump(log, open('./stablestorage/stablelog',"a+"))
+    printt("finished writing logBuffer to stable log")
+    logBuffer=[]
+    printt("force completed")
+
 
 def commit():
     pass
@@ -177,6 +202,6 @@ write(2,6,2,2,"bb")
 line=3
 write(2,7,2,2,"cc")
 line=4
-write(1,2,3,"dd")
+write(1,1,2,3,"dd")
 line=5
-write(3,2,2,"ee")
+write(3,3,2,2,"ee")
