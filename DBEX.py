@@ -48,9 +48,11 @@ def fetch(id):
     return lru
 
 def checkForLogEntry(pageid):
+    print("!!! pageid=" + str(pageid))
     for log in logBuffer:
         try: 
             x=log["page"]
+            print("!!!page="+str(x))
             if(x==pageid):
                 return True
         except:
@@ -61,7 +63,7 @@ def checkForLogEntry(pageid):
 def flushByCacheLocation(i):
     global cache
     printt("checking if the page has a relevant log entry")
-    if(checkForLogEntry(cache[i]["page"])==True):
+    if(checkForLogEntry(cache[i]["page"]["id"])==True):
         printt("there is a log with relavnt pageid0, forcing")
         force()
     printt("writing page to stable storage")
@@ -73,6 +75,7 @@ def flushByCacheLocation(i):
     
     json.dump(page, open('./stablestorage/'+ str(cache[i]["page"]["id"]),"w+"))
     printt("writing was completed")
+
 def flush(pageid):
     for i in range(0,3):
         if(cache[i]["page"]["id"]==pageid):
@@ -85,7 +88,7 @@ def force():
     global logBuffer
     printt("start forcing, writing logBuffer into stable log")
     for log in logBuffer:
-        printt("writing log entry with params " + log)
+        printt("writing log entry with params " + str(log))
         json.dump(log, open('./stablestorage/stablelog',"a+"))
     printt("finished writing logBuffer to stable log")
     logBuffer=[]
@@ -126,6 +129,8 @@ def write(tid,id,length,offset,value):
     global cache
     global cacheGeneralCounter
     global activetrans
+    global sequence
+    global logBuffer
     printt("checking if the trans=" + str(tid) +  " is in active trans")
     if(checkLSNofTrans(tid)==-1):
         printt("trans with tid=" + str(tid) + "not in activetrans, adding to active trans")
@@ -144,10 +149,15 @@ def write(tid,id,length,offset,value):
         cache[cached]["page"]["content"][i]=value[i-offset]
         cacheGeneralCounter+=1
         cache[cached]["cacheCounter"]=cacheGeneralCounter
-    cache[cached]["page"]["psn"]+=1   
-    cache[cached]["page"]["status"]=1
-    logEntry={}
-    #logEntry["LSN"]=
+    lastpsn=cache[cached]["page"]["psn"]
+    cache[cached]["page"]["psn"]=sequence   
+    cache[cached]["page"]["status"]="dirty"
+    logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":lastpsn}
+    for tran in activetransL:
+        if(tran["tid"]==tid):
+            tran["lsn"]=sequence
+    logBuffer.append(logentry)
+    sequence+=1
     printt("write finished")
 #get trans id and return the last sequence number of it, -1 if there is no tid)
 def checkLSNofTrans(tid):
@@ -174,6 +184,8 @@ def printt(string=None):
         jumpToNextLine = line+1
     elif(parsed[0]=="J"):
         jumpToNextLine = int(parsed[1])
+    elif(parsed[0=="l"]):
+        print(logBuffer)
 
 def printCachePage(pageid):
     for i in range(0,3):
@@ -205,3 +217,12 @@ line=4
 write(1,1,2,3,"dd")
 line=5
 write(3,3,2,2,"ee")
+line=6
+write(1,9,2,3,"AAA")
+line=7
+write(1,10,2,3,"BBB")
+line-9
+write(1,10,2,3,"BBB")
+line=10
+write(1,5,2,3,"BBB")
+write(1,6,2,3,"BCB")
