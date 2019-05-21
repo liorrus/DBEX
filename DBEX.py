@@ -153,7 +153,7 @@ def write(tid,id,length,offset,value):
     cache[cached]["page"]["psn"]=sequence   
     cache[cached]["page"]["status"]="dirty"
     logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":lastpsn}
-    for tran in activetransL:
+    for tran in activetrans:
         if(tran["tid"]==tid):
             tran["lsn"]=sequence
     logBuffer.append(logentry)
@@ -177,17 +177,28 @@ def printt(string=None):
     
     if(parsed[0] =="n"): 
         return
-    elif(parsed[0] == "M"): 
-        printCachePage(int(parsed[1]))
-        printt()
+    #elif(parsed[0] == "M"): 
+        #printCachePage(int(parsed[1]))
+        #printt()
     elif(parsed[0]=="c"):
         jumpToNextLine = line+1
     elif(parsed[0]=="J"):
         jumpToNextLine = int(parsed[1])
-    elif(parsed[0=="l"]):
+    elif(parsed[0]=="l"):
         print(logBuffer)
+        printt()
+    elif(parsed[0]=="m"):
+        printCachePage(int(parsed[1]))
+        printt()
+    elif(parsed[0]=="M"):
+        printStablePage(int(parsed[1]))
+        printt()
+
+def printStablePage(pageid):
+    print(json.load(open('./stablestorage/'+ str(pageid))))
 
 def printCachePage(pageid):
+    print(cache)
     for i in range(0,3):
         if(cache[i]!={}):
             if(int(cache[i]["page"]["id"])==pageid):
@@ -225,4 +236,5 @@ line-9
 write(1,10,2,3,"BBB")
 line=10
 write(1,5,2,3,"BBB")
+line=11
 write(1,6,2,3,"BCB")
