@@ -95,7 +95,8 @@ def force():
     printt("force completed")
 
 
-def commit():
+def commit(tid):
+    printt("commiting " + str(tid))
     pass
 
 def begin(tid):
@@ -207,8 +208,43 @@ def printCachePage(pageid):
     printt("there is no page on cache, with id="+str(pageid))
     return
     
+def abort(tid):
+    printt("aborting trans=" + str(tid) )
 def createLogEntry():
     pass
+def checkpoint():
+    printt("checkpointing")
+
+def readFile(filepath):
+    global line
+    with open(filepath) as fp:  
+        row = fp.readline()
+        while row:
+            if "UPDATE" in row:
+                parsed=row.split(":")
+                tid=parsed[0]
+                parsed1=parsed[1].split("UPDATE")
+                parsed2=parsed1[1].split(",")
+                write(tid, int(parsed2[0]), int(parsed2[1]), int(parsed2[2]), str(parsed2[3]))
+            elif "COMMIT" in row:
+                commit(int(row.split(":")[0]))
+            elif "ABORT" in row:
+                abort(int(row.split(":")[0]))
+            elif "CHECKPOINT":
+                checkpoint()
+            row = fp.readline()
+            line += 1
+
+def readLogStable():
+    stablelog=[]
+    with open("./stablestorage/stablelog") as fp:
+        row = fp.readline()
+    parsed=row.split("}")
+    for p in parsed[:-1]:
+       temp=json.loads(str(p+"}"))
+       stablelog.append(temp)
+    print(stablelog)
+
 
 #checkPageInCache(5)
 #fetch(5)
@@ -217,7 +253,11 @@ def createLogEntry():
 #fetch(8)
 #checkPageInCache(5)
 #checkPageInCache(8)
-createStableStorage()
+#createStableStorage()
+#readFile("commands.txt")
+readLogStable()
+
+"""
 line=1
 write(1,5,2,2,"aa")
 line=2
@@ -238,3 +278,4 @@ line=10
 write(1,5,2,3,"BBB")
 line=11
 write(1,6,2,3,"BCB")
+"""
