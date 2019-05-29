@@ -8,12 +8,11 @@ line=0
 jumpToNextLine=0
 activetrans=[]
 sequence = 1
-MasterRecord=[] # StartPointer, LastCP
+MasterRecord={} # StartPointer, LastCP
 #create a empty Stable Storage
 def createStableStorage():
     for i in range(1,21):
         if (os.path.isfile('./stablestorage/'+ str(i)) == False):
-            printt("kakif " + str(i))
             page = {}
             page["id"]=i
             page["psn"]=0
@@ -22,6 +21,33 @@ def createStableStorage():
     if(os.path.isfile('./stablestorage/stablelog') == False):
         open('./stablestorage/stablelog',"ab")
 
+def findIndex_SeqNuM(seq):
+    counter=0
+    for log in logBuffer:
+        if(log["lsn"]==seq):
+            return counter;
+    return -1;
+
+def abort(tid):
+    global sequence
+    global MasterRecord
+    global activetrans
+    global logBuffer
+
+    LastSeqNo=findIndex_SeqNuM(checkLSNofTrans(tid))
+    while(LastSeqNo!=None):
+        if(logBuffer[LastSeqNo]["actiontype"] == "write"):
+            inverse(logBuffer[LastSeqNo])
+        LastSeqNo=logBuffer[LastSeqNo]["PreviousSN"]
+    logentry={"lsn": sequence, "actiontype":"rollback", "tid": tid,"PreviousSN":checkLSNofTrans(tid)}
+    logBuffer.append(logentry)
+    printt("trans=" + tid  + "is aborted. \n" +
+          "creating new log entry with " + str(logentry))
+    activetrans.remove({"tid": tid, "lsn": checkLSNofTrans(tid)})
+    printt("trans=" + str(tid)  + " is now not in Activators \n")
+    force()
+    sequence+=1
+    printt("abort finished")
 
 
 
@@ -86,13 +112,13 @@ def checkpoint():
     for i in range (0,3):
         if(cache[i]!={} and  cache[i]["page"]["status"]=='dirty'):
              flush(cache[i]["page"]["id"])
-             tid.append(int(cache["page"]["id"])
-    logentry={"lsn": sequence, "actiontype":"checkpoint", "tid": tid,"PreviousSN":None}
+             tid.append(int(cache[i]["page"]["id"]))
+    logentry = {"lsn": sequence, "actiontype":"checkpoint", "tid": tid, "PreviousSN":None}
     printt("trans=" + str(tid)  + "are flushed because of checkpoint action. \n" +
           "creating new log entry with " + str(logentry))
     logBuffer.append(logentry)
     force()
-    MasterRecord[LastCP]=sequence
+    MasterRecord["LastCP"]=sequence
     sequence+=1
     printt("checkpoint finished")
 
@@ -157,7 +183,7 @@ def LRU():
             printt("least used page is in cache pag i="+ str(i))
             return i
 
-def write(tid,id,length,offset,value):
+def write(tid,id,length,offset,value,flag=1):
     global cache
     global cacheGeneralCounter
     global activetrans
@@ -177,14 +203,16 @@ def write(tid,id,length,offset,value):
     else:
         printt("page on cache at i=" + str(cached))
     printt("change content and psn")
+    old_value=''
     for i in range(offset,offset+length):
+        old_value=old_value+cache[cached]["page"]["content"][i]
         cache[cached]["page"]["content"][i]=value[i-offset]
         cacheGeneralCounter+=1
         cache[cached]["cacheCounter"]=cacheGeneralCounter
     lastpsn=cache[cached]["page"]["psn"]
     cache[cached]["page"]["psn"]=sequence   
     cache[cached]["page"]["status"]="dirty"
-    logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":lastpsn}
+    logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":lastpsn,"length":length, "offset":offset,"oldvValue":old_value}
     
     for tran in activetrans:
         if(tran["tid"]==tid):
@@ -226,6 +254,8 @@ def printt(string=None):
     elif(parsed[0]=="M"):
         printStablePage(int(parsed[1]))
         printt()
+    elif(parsed[0]=="a"):
+        printt(str(activetrans))
 
 def printStablePage(pageid):
     print(json.load(open('./stablestorage/'+ str(pageid))))
@@ -243,6 +273,65 @@ def printCachePage(pageid):
 def createLogEntry():
     pass
 
+def readFile(filepath):
+    global line
+    with open(filepath) as fp:  
+        row = fp.readline()
+        while row:
+            if "UPDATE" in row:
+                parsed=row.split(":")
+                tid=parsed[0]
+                parsed1=parsed[1].split("UPDATE")
+                parsed2=parsed1[1].split(",")
+                write(int(tid), int(parsed2[0]), int(parsed2[1]), int(parsed2[2]), str(parsed2[3]))
+            elif "COMMIT" in row:
+                commit(int(row.split(":")[0]))
+            elif "ABORT" in row:
+                abort(int(row.split(":")[0]))
+            elif "CHECKPOINT":
+                checkpoint()
+            row = fp.readline()
+            line += 1
+
+def readLogStable():
+    stablelog=[]
+    with open("./stablestorage/stablelog") as fp:
+        row = fp.readline()
+    parsed=row.split("}")
+    for p in parsed[:-1]:
+       temp=json.loads(str(p+"}"))
+       stablelog.append(temp)
+    print(stablelog)
+ 
+def inverse(logentry):
+    printt("starting inverse of log")
+    global cache
+    global cacheGeneralCounter
+    global activetrans
+    global sequence
+    global logBuffer
+    cached=checkPageInCache(logentry["page"])
+    if(cached == -1):
+        printt("page not on cache")
+        cached=fetch(logentry["page"])
+        printt("page is now on cache at i=" + str(cached))
+    else:
+        printt("page on cache at i=" + str(cached))
+    printt("change content and psn")
+    for i in range(logentry["offset"],logentry["offset"]+logentry["length"]):
+        cache[cached]["page"]["content"][i]=logentry["oldValue"][i-logentry["offset"]]
+        cacheGeneralCounter+=1
+        cache[cached]["cacheCounter"]=cacheGeneralCounter
+    lastpsn=cache[cached]["page"]["psn"]
+    cache[cached]["page"]["psn"]=sequence   
+    cache[cached]["page"]["status"]="dirty"
+    logentry={"lsn": sequence, "actiontype":"compensation","PreviousSN":checkLSNofTrans(logentry["tid"])}
+    for tran in activetrans:
+        if(tran["tid"]==tid):
+            tran["lsn"]=sequence
+    logBuffer.append(logentry)
+    sequence+=1
+    printt("compansisiton finished" + str(logentry))
 #checkPageInCache(5)
 #fetch(5)
 #fetch(6)
@@ -251,6 +340,10 @@ def createLogEntry():
 #checkPageInCache(5)
 #checkPageInCache(8)
 createStableStorage()
+createStableStorage()
+readFile("commands.txt")
+#readLogStable()
+"""
 line=1
 write(1,5,2,2,"aa")
 line=2
@@ -271,3 +364,4 @@ line=10
 write(1,5,2,3,"BBB")
 line=11
 write(1,6,2,3,"BCB")
+"""
