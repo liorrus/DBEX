@@ -8,6 +8,7 @@ line=0
 jumpToNextLine=0
 activetrans=[]
 sequence = 1
+MasterRecord=[] # StartPointer, LastCP
 #create a empty Stable Storage
 def createStableStorage():
     for i in range(1,21):
@@ -20,6 +21,7 @@ def createStableStorage():
             json.dump(page, open('./stablestorage/'+ str(i),"w+"))
     if(os.path.isfile('./stablestorage/stablelog') == False):
         open('./stablestorage/stablelog',"ab")
+
 
 
 
@@ -76,6 +78,24 @@ def flushByCacheLocation(i):
     json.dump(page, open('./stablestorage/'+ str(cache[i]["page"]["id"]),"w+"))
     printt("writing was completed")
 
+def checkpoint():
+    global sequence
+    global MasterRecord
+    global activetrans
+    tid=[]
+    for i in range (0,3):
+        if(cache[i]!={} and  cache[i]["page"]["status"]=='dirty'):
+             flush(cache[i]["page"]["id"])
+             tid.append(int(cache["page"]["id"])
+    logentry={"lsn": sequence, "actiontype":"checkpoint", "tid": tid,"PreviousSN":None}
+    printt("trans=" + str(tid)  + "are flushed because of checkpoint action. \n" +
+          "creating new log entry with " + str(logentry))
+    logBuffer.append(logentry)
+    force()
+    MasterRecord[LastCP]=sequence
+    sequence+=1
+    printt("checkpoint finished")
+
 def flush(pageid):
     for i in range(0,3):
         if(cache[i]["page"]["id"]==pageid):
@@ -96,12 +116,23 @@ def force():
 
 
 def commit(tid):
-    printt("commiting " + str(tid))
-    pass
+    global sequence
+    global activetrans
+    global logBuffer
+    printt("Remove trans= " + str(tid) + " from activetrans")
+    activetrans.remove({"tid": tid, "lsn": checkLSNofTrans(tid)})
+    logentry={"lsn": sequence, "actiontype":"commit", "tid": tid,"PreviousSN":None}
+    printt("trans=" + str(tid)  + " is now not in Activators \n" + "creating new log entry with " + str(logentry))
+    logBuffer.append(logentry)
+    force()
+    sequence+=1
+    printt("commit finished")
 
 def begin(tid):
     global sequence
     printt("adding trans=" + str(tid) + "activetrans")
+    if (activetrans=={}):
+        MasterRecord[StartPointer]=sequence
     activetrans.append({"tid": tid, "lsn": sequence})
     logentry={"lsn": sequence, "actiontype":"begin", "tid": tid,"PreviousSN":None}
     
@@ -154,6 +185,7 @@ def write(tid,id,length,offset,value):
     cache[cached]["page"]["psn"]=sequence   
     cache[cached]["page"]["status"]="dirty"
     logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":lastpsn}
+    
     for tran in activetrans:
         if(tran["tid"]==tid):
             tran["lsn"]=sequence
@@ -176,7 +208,7 @@ def printt(string=None):
     read=input()
     parsed=read.split(" ")
     
-    if(parsed[0] =="n"): 
+    if(parsed[0] == "n"): 
         return
     #elif(parsed[0] == "M"): 
         #printCachePage(int(parsed[1]))
@@ -208,43 +240,8 @@ def printCachePage(pageid):
     printt("there is no page on cache, with id="+str(pageid))
     return
     
-def abort(tid):
-    printt("aborting trans=" + str(tid) )
 def createLogEntry():
     pass
-def checkpoint():
-    printt("checkpointing")
-
-def readFile(filepath):
-    global line
-    with open(filepath) as fp:  
-        row = fp.readline()
-        while row:
-            if "UPDATE" in row:
-                parsed=row.split(":")
-                tid=parsed[0]
-                parsed1=parsed[1].split("UPDATE")
-                parsed2=parsed1[1].split(",")
-                write(tid, int(parsed2[0]), int(parsed2[1]), int(parsed2[2]), str(parsed2[3]))
-            elif "COMMIT" in row:
-                commit(int(row.split(":")[0]))
-            elif "ABORT" in row:
-                abort(int(row.split(":")[0]))
-            elif "CHECKPOINT":
-                checkpoint()
-            row = fp.readline()
-            line += 1
-
-def readLogStable():
-    stablelog=[]
-    with open("./stablestorage/stablelog") as fp:
-        row = fp.readline()
-    parsed=row.split("}")
-    for p in parsed[:-1]:
-       temp=json.loads(str(p+"}"))
-       stablelog.append(temp)
-    print(stablelog)
-
 
 #checkPageInCache(5)
 #fetch(5)
@@ -253,11 +250,7 @@ def readLogStable():
 #fetch(8)
 #checkPageInCache(5)
 #checkPageInCache(8)
-#createStableStorage()
-#readFile("commands.txt")
-readLogStable()
-
-"""
+createStableStorage()
 line=1
 write(1,5,2,2,"aa")
 line=2
@@ -278,4 +271,3 @@ line=10
 write(1,5,2,3,"BBB")
 line=11
 write(1,6,2,3,"BCB")
-"""
