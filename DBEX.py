@@ -301,7 +301,40 @@ def readLogStable():
     for p in parsed[:-1]:
        temp=json.loads(str(p+"}"))
        stablelog.append(temp)
-    print(stablelog)
+    return stablelog
+
+def redo():
+    global cacheGeneralCounter 
+    global cache
+    global logBuffer
+    global sequence 
+    printt("redo phase start reading stablelog")
+    logBuffer=readLogStable()
+    printt("stablelog is now at log buffer")
+    for log in logBuffer():
+        printt("checking if log type is write or rollback")
+        if(log["actiontype"]=="write" or log["actiontpye"]=="compensation"):
+            printt("log type is compensation or rollback, fetching page")    
+            cached=fetch(log["page"])
+            printt("page is now on cache page=" +str(cached) + " checking if page sequence is smaller then log sequence")
+            if(cache[cached]["page"]["psn"]<log["sequence"]):
+                printt("page sequence is smaller, redo log: checking if compansation or write")
+                if(log["actiontype"]=="write"):
+                    printt(" log action type is write, starting write to cache page")
+                    for i in range(int(log["offset"]),int(log["offset"])+int(log["length"])):
+                        cache[cached]["page"]["content"][i]=value[i-offset]
+                        cacheGeneralCounter+=1
+                        cache[cached]["cacheCounter"]=cacheGeneralCounter
+                    cache[cached]["page"]["psn"]=log["sequence"]
+                    cache[cached]["page"]["status"]="dirty"
+                elif(log["actiontype"]=="compensation"):
+                    printt("log type is compensation, starting compansation to cache page")
+                    
+
+
+
+
+     
  
 def inverse(logentry):
     printt("starting inverse of log")
@@ -332,36 +365,8 @@ def inverse(logentry):
     logBuffer.append(logentry)
     sequence+=1
     printt("compansisiton finished" + str(logentry))
-#checkPageInCache(5)
-#fetch(5)
-#fetch(6)
-#fetch(7)
-#fetch(8)
-#checkPageInCache(5)
-#checkPageInCache(8)
+
+
 createStableStorage()
 createStableStorage()
 readFile("commands.txt")
-#readLogStable()
-"""
-line=1
-write(1,5,2,2,"aa")
-line=2
-write(2,6,2,2,"bb")
-line=3
-write(2,7,2,2,"cc")
-line=4
-write(1,1,2,3,"dd")
-line=5
-write(3,3,2,2,"ee")
-line=6
-write(1,9,2,3,"AAA")
-line=7
-write(1,10,2,3,"BBB")
-line-9
-write(1,10,2,3,"BBB")
-line=10
-write(1,5,2,3,"BBB")
-line=11
-write(1,6,2,3,"BCB")
-"""
