@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 
 cacheGeneralCounter = 0
 cache=[{},{},{}]
@@ -8,15 +9,24 @@ line=0
 jumpToNextLine=0
 activetrans=[]
 sequence = 1
+fileName=''
 MasterRecord={} # StartPointer, LastCP
 #create a empty Stable Storage
 def createStableStorage():
+    folder = './stablestorage'
+    for the_file in os.listdir(folder):
+        file_path = os.path.join(folder, the_file)
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+        except Exception as e:
+            print(e)
     for i in range(1,21):
         if (os.path.isfile('./stablestorage/'+ str(i)) == False):
             page = {}
             page["id"]=i
             page["psn"]=0
-            page["content"]=[None]*20
+            page["content"]=[" "]*20
             json.dump(page, open('./stablestorage/'+ str(i),"w+"))
     if(os.path.isfile('./stablestorage/stablelog') == False):
         open('./stablestorage/stablelog',"ab")
@@ -26,6 +36,7 @@ def findIndex_SeqNuM(seq):
     for log in logBuffer:
         if(log["lsn"]==seq):
             return counter;
+        counter+=1
     return -1;
 
 def abort(tid):
@@ -35,16 +46,20 @@ def abort(tid):
     global logBuffer
 
     LastSeqNo=findIndex_SeqNuM(checkLSNofTrans(tid))
-    while(LastSeqNo!=None):
+    while(LastSeqNo!=-1):
+        printt("LastSeqNo="+str(LastSeqNo))
         if(logBuffer[LastSeqNo]["actiontype"] == "write"):
             inverse(logBuffer[LastSeqNo])
         LastSeqNo=logBuffer[LastSeqNo]["PreviousSN"]
     logentry={"lsn": sequence, "actiontype":"rollback", "tid": tid,"PreviousSN":checkLSNofTrans(tid)}
     logBuffer.append(logentry)
-    printt("trans=" + tid  + "is aborted. \n" +
+    printt("trans=" + str(tid)  + "is aborted. \n" +
           "creating new log entry with " + str(logentry))
     activetrans.remove({"tid": tid, "lsn": checkLSNofTrans(tid)})
     printt("trans=" + str(tid)  + " is now not in Activators \n")
+    for tran in activetrans:
+       if(tran["tid"]==tid):
+           tran["lsn"]=sequence
     force()
     sequence+=1
     printt("abort finished")
@@ -99,6 +114,8 @@ def flushByCacheLocation(i):
     page["id"] = cache[i]["page"]["id"]
     page["psn"] = cache[i]["page"]["psn"]
     page["content"]=cache[i]["page"]["content"]
+    print(str(cache[i]["page"]))
+    print(str(page))
     cache[i]["page"]["status"] == "clean"
     
     json.dump(page, open('./stablestorage/'+ str(cache[i]["page"]["id"]),"w+"))
@@ -132,12 +149,18 @@ def flush(pageid):
 
 def force():
     global logBuffer
+    stab=readLogStable()
+    sequncesInStableLog=[]
     printt("start forcing, writing logBuffer into stable log")
+    for log in stab:
+        sequncesInStableLog.append(int(log["lsn"])) 
     for log in logBuffer:
+        if(int(log["lsn"]) in sequncesInStableLog):
+            continue
         printt("writing log entry with params " + str(log))
         json.dump(log, open('./stablestorage/stablelog',"a+"))
     printt("finished writing logBuffer to stable log")
-    logBuffer=[]
+    #logBuffer=[]
     printt("force completed")
 
 
@@ -150,6 +173,9 @@ def commit(tid):
     logentry={"lsn": sequence, "actiontype":"commit", "tid": tid,"PreviousSN":None}
     printt("trans=" + str(tid)  + " is now not in Activators \n" + "creating new log entry with " + str(logentry))
     logBuffer.append(logentry)
+    for tran in activetrans:
+       if(tran["tid"]==tid):
+           tran["lsn"]=sequence
     force()
     sequence+=1
     printt("commit finished")
@@ -184,6 +210,7 @@ def LRU():
             return i
 
 def write(tid,id,length,offset,value,flag=1):
+    print("write "+ str(value))
     global cache
     global cacheGeneralCounter
     global activetrans
@@ -205,14 +232,15 @@ def write(tid,id,length,offset,value,flag=1):
     printt("change content and psn")
     old_value=''
     for i in range(offset,offset+length):
-        old_value=old_value+cache[cached]["page"]["content"][i]
+        old_value=old_value+str(cache[cached]["page"]["content"][i])
+        print("value char: "+ str(value[i-offset]))
         cache[cached]["page"]["content"][i]=value[i-offset]
         cacheGeneralCounter+=1
         cache[cached]["cacheCounter"]=cacheGeneralCounter
     lastpsn=cache[cached]["page"]["psn"]
     cache[cached]["page"]["psn"]=sequence   
     cache[cached]["page"]["status"]="dirty"
-    logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":lastpsn,"length":length, "offset":offset,"oldvValue":old_value}
+    logentry={"page": id, "lsn": sequence, "actiontype":"write", "tid": tid,"PreviousSN":checkLSNofTrans(tid),"length":length, "offset":offset,"value":value,"oldValue":old_value}
     
     for tran in activetrans:
         if(tran["tid"]==tid):
@@ -220,7 +248,14 @@ def write(tid,id,length,offset,value,flag=1):
     logBuffer.append(logentry)
     sequence+=1
     printt("write finished")
+
 #get trans id and return the last sequence number of it, -1 if there is no tid)
+def checkLSNofTrans(tid):
+    for tran in activetrans:
+        if(tran["tid"]==tid):
+            return tran["lsn"]
+    return -1
+
 def checkLSNofTrans(tid):
     for tran in activetrans:
         if(tran["tid"]==tid):
@@ -256,12 +291,32 @@ def printt(string=None):
         printt()
     elif(parsed[0]=="a"):
         printt(str(activetrans))
+    elif(parsed[0]=="b"):
+        printt(str(cache))
+    elif(parsed[0]=="Z"):
+        printCommands()
+        printt()
+    elif(parsed[0]=="L"):
+        printt(readLogStable())
+    elif(parsed[0]=="t"):
+        for i in range(0,3):
+            if(cache[i] !={} ):
+               if(cache[i]["page"]["status"] == 'dirty'):
+                    print(cache[i]["page"])
+    elif(parsed[0]=="K"):
+         quit()
+    elif(parsed[0]=="r"):
+           for tran in activetrans :
+                print(tran)
+    elif(parsed[0]=="s"):
+        printt(sequence)
 
+          
+        
 def printStablePage(pageid):
     print(json.load(open('./stablestorage/'+ str(pageid))))
 
 def printCachePage(pageid):
-    print(cache)
     for i in range(0,3):
         if(cache[i]!={}):
             if(int(cache[i]["page"]["id"])==pageid):
@@ -273,8 +328,18 @@ def printCachePage(pageid):
 def createLogEntry():
     pass
 
+def printCommands():
+    global line
+    f=open(fileName)
+    lines=f.readlines()
+    for i in range(line,len(lines)):
+        print(lines[i])
+
+
 def readFile(filepath):
     global line
+    global fileName
+    fileName = filepath
     with open(filepath) as fp:  
         row = fp.readline()
         while row:
@@ -283,7 +348,8 @@ def readFile(filepath):
                 tid=parsed[0]
                 parsed1=parsed[1].split("UPDATE")
                 parsed2=parsed1[1].split(",")
-                write(int(tid), int(parsed2[0]), int(parsed2[1]), int(parsed2[2]), str(parsed2[3]))
+                print(("readfile: " + str(parsed2[3][1:-1])))
+                write(int(tid), int(parsed2[0]), int(parsed2[1]), int(parsed2[2]), str(parsed2[3][2:-2]))
             elif "COMMIT" in row:
                 commit(int(row.split(":")[0]))
             elif "ABORT" in row:
@@ -292,6 +358,7 @@ def readFile(filepath):
                 checkpoint()
             row = fp.readline()
             line += 1
+            printt()
 
 def readLogStable():
     stablelog=[]
@@ -311,30 +378,25 @@ def redo():
     printt("redo phase start reading stablelog")
     logBuffer=readLogStable()
     printt("stablelog is now at log buffer")
-    for log in logBuffer():
-        printt("checking if log type is write or rollback")
-        if(log["actiontype"]=="write" or log["actiontpye"]=="compensation"):
-            printt("log type is compensation or rollback, fetching page")    
-            cached=fetch(log["page"])
+
+    for log in logBuffer:
+        printt("checking if log type is write or compensaton, log type is: " + str(log["actiontype"]) )
+        if(log["actiontype"]=="write" or log["actiontype"]=="compensation"):
+            printt("log type is "+str(log["actiontype"]) + "  , fetching page")    
+            if(checkPageInCache((log["page"])) == -1):
+               cached=fetch(log["page"])
             printt("page is now on cache page=" +str(cached) + " checking if page sequence is smaller then log sequence")
-            if(cache[cached]["page"]["psn"]<log["sequence"]):
+            if(cache[cached]["page"]["psn"]<log["lsn"]):
                 printt("page sequence is smaller, redo log: checking if compansation or write")
-                if(log["actiontype"]=="write"):
-                    printt(" log action type is write, starting write to cache page")
-                    for i in range(int(log["offset"]),int(log["offset"])+int(log["length"])):
-                        cache[cached]["page"]["content"][i]=value[i-offset]
-                        cacheGeneralCounter+=1
-                        cache[cached]["cacheCounter"]=cacheGeneralCounter
-                    cache[cached]["page"]["psn"]=log["sequence"]
-                    cache[cached]["page"]["status"]="dirty"
-                elif(log["actiontype"]=="compensation"):
-                    printt("log type is compensation, starting compansation to cache page")
-                    
-
-
-
-
-     
+                for i in range(int(log["offset"]),int(log["offset"])+int(log["length"])):
+                    cache[cached]["page"]["content"][i]=log["value"][i-log["offset"]]
+                    cacheGeneralCounter+=1
+                    cache[cached]["cacheCounter"]=cacheGeneralCounter
+                cache[cached]["page"]["psn"]=log["lsn"]
+                cache[cached]["page"]["status"]="dirty"
+        sequence = log["lsn"]
+    print(str(cache))
+    
  
 def inverse(logentry):
     printt("starting inverse of log")
@@ -352,21 +414,107 @@ def inverse(logentry):
         printt("page on cache at i=" + str(cached))
     printt("change content and psn")
     for i in range(logentry["offset"],logentry["offset"]+logentry["length"]):
+        print(str(logentry["oldValue"]))
+        print(str(logentry["oldValue"][i-logentry["offset"]]))
         cache[cached]["page"]["content"][i]=logentry["oldValue"][i-logentry["offset"]]
         cacheGeneralCounter+=1
         cache[cached]["cacheCounter"]=cacheGeneralCounter
     lastpsn=cache[cached]["page"]["psn"]
     cache[cached]["page"]["psn"]=sequence   
     cache[cached]["page"]["status"]="dirty"
-    logentry={"lsn": sequence, "actiontype":"compensation","PreviousSN":checkLSNofTrans(logentry["tid"])}
-    for tran in activetrans:
-        if(tran["tid"]==tid):
-            tran["lsn"]=sequence
+    logentry={"lsn": sequence, "actiontype":"compensation","NextUndoSeqNo":logentry["PreviousSN"],"page":logentry["page"],"offset":logentry["offset"],"value":logentry["value"],"length":logentry["length"]}
     logBuffer.append(logentry)
     sequence+=1
     printt("compansisiton finished" + str(logentry))
+    printt(str(cache))
 
+def undo():
+    printt('undo begin!')
+    global sequence
+    global MasterRecord
+    global activetrans
+    global logBuffer
 
-createStableStorage()
-createStableStorage()
-readFile("commands.txt")
+    logBuffer= readLogStable()
+    loser=[];
+    printt("build losers and max lsn data type")
+    for log in logBuffer:
+        if(log["actiontype"] == "begin"):
+            loser.append([int(log["tid"]),-1])
+        if(log["actiontype"] == "commit" or log["actiontype"] == "rollback"):
+           for los in loser:
+               if(los[0]==int(log["tid"])):
+                   loser.remove(los)
+                   break
+    for los in loser:
+        for log in logBuffer:
+            if(int(log["tid"] == los[0] )):
+                los[1] = int(log["lsn"])
+        
+    printt(str(loser))
+
+    while(len(loser) != 0):
+            LastSeqNo_tid, LastSeqNo = findMaxSeq_InLosers(loser)
+            printt("the max seq is: " + str(LastSeqNo)+"the  tid is: " + str(LastSeqNo_tid))
+
+            index_in_log = findIndex_SeqNuM(LastSeqNo)
+            index_in_los = findIndex_InLosers(loser,LastSeqNo_tid)
+
+            if(logBuffer[index_in_log]["actiontype"] == "compensation"):
+                printt("the action is compensation")
+                loser[index_in_los][1]=logBuffer[index_in_log]["NextUndoSeqNo"]
+
+            if(logBuffer[index_in_log]["actiontype"] == "write"):
+                printt("the action is write")
+                pageNum = logBuffer[index_in_log]["page"]
+                if(checkPageInCache(pageNum) == -1):
+                    fetch(pageNum)
+                
+                if(cache[checkPageInCache(pageNum)]["page"]["psn"] >= LastSeqNo):
+                    inverse(logBuffer[index_in_log])
+                loser[index_in_los][1]=logBuffer[index_in_log]["PreviousSN"]
+
+            if(logBuffer[index_in_log]["actiontype"] == "begin"):
+                printt("the action is begin")
+                logentry={"lsn": sequence, "actiontype":"rollback", "tid": LastSeqNo_tid,"PreviousSN":checkLSNofTrans(LastSeqNo_tid)}
+                logBuffer.append(logentry)
+                printt("trans=" + str(LastSeqNo_tid) + "is undo. \n" +"creating new log entry with " + str(logentry))
+                loser.remove([LastSeqNo_tid, LastSeqNo])
+                printt("trans=" + str(LastSeqNo_tid)  + " is now not in Activators \n")
+            sequence+=1
+            force()
+
+def findMaxSeq_InLosers(loser): 
+    LastSeqNo=-1
+    LastSeqNo_tid=-1
+    for los in loser:
+        if(LastSeqNo< int(los[1])):
+            LastSeqNo_tid = int(los[0])
+            LastSeqNo = int(los[1])
+    return LastSeqNo_tid, LastSeqNo
+
+def findIndex_InLosers(loser,tid):
+    counter=0
+    for los in loser:
+        if(los[0] == tid):
+            return counter
+        counter+=1
+    return -1
+def startFunction():
+    global line
+    print("Enter f if it is 'First Use'     or       r if it is 'Recover Mode'")
+    read=input()
+    if(read == "f"):
+        createStableStorage()
+        readFile("SENARIO2.txt")
+    else:
+        redo()
+        line+=1
+        printt('redo finished!')
+        undo()
+        line+=1
+        printt('    Recover Completed!!')
+        
+
+startFunction()
+
