@@ -2,16 +2,19 @@ import os
 import json
 import shutil
 
-cacheGeneralCounter = 0
-cache=[{},{},{}]
-logBuffer=[]
-line=0
-jumpToNextLine=0
-activetrans=[]
-sequence = 1
+cacheGeneralCounter = 0 # used for LRU
+cache=[{},{},{}] # cache with place for 3 pages
+logBuffer=[] # log buffer
+line=0 # used for telling us what is the line we are reading
+jumpToNextLine=0 # used in order to skip all stoping until this line
+activetrans=[] # list of a tuple of active transaction and there last sequence 
+sequence = 1 # sequence counter
 fileName=''
+forceDeleteLogBuffer=True
 MasterRecord={} # StartPointer, LastCP
-#create a empty Stable Storage
+
+
+#create a empty Stable Storage If needed delete old one
 def createStableStorage():
     folder = './stablestorage'
     for the_file in os.listdir(folder):
@@ -31,6 +34,8 @@ def createStableStorage():
     if(os.path.isfile('./stablestorage/stablelog') == False):
         open('./stablestorage/stablelog',"ab")
 
+#param: log sequence
+#return: the index of the log with sequnce on log buffer
 def findIndex_SeqNuM(seq):
     counter=0
     for log in logBuffer:
@@ -39,12 +44,17 @@ def findIndex_SeqNuM(seq):
         counter+=1
     return -1;
 
+
+#abort tid
 def abort(tid):
     global sequence
     global MasterRecord
     global activetrans
     global logBuffer
-
+    global forceDeleteLogBuffer
+    forceDeleteLogBuffer=False
+    stab=readLogStable()
+    logBuffer=stab+logBuffer
     LastSeqNo=findIndex_SeqNuM(checkLSNofTrans(tid))
     while(LastSeqNo!=-1):
         printt("LastSeqNo="+str(LastSeqNo))
@@ -60,6 +70,7 @@ def abort(tid):
     for tran in activetrans:
        if(tran["tid"]==tid):
            tran["lsn"]=sequence
+    forceDeleteLogBuffer=True
     force()
     sequence+=1
     printt("abort finished")
@@ -76,6 +87,8 @@ def checkPageInCache(id):
     printt("page not in cache")
     return -1
 
+#param: page id
+#return: the location of the page on cache (but it brings from cache)
 def fetch(id):
     printt("start fetching page=" + str(id))
     global cacheGeneralCounter
@@ -90,6 +103,8 @@ def fetch(id):
     cacheGeneralCounter += 1
     return lru
 
+#param: pageid
+#return: true if there is a log rellavant to that pageid in log buffer
 def checkForLogEntry(pageid):
     print("!!! pageid=" + str(pageid))
     for log in logBuffer:
@@ -102,7 +117,8 @@ def checkForLogEntry(pageid):
             pass
     return False
 
-#need to do as on algo this only temp"
+#param: cache index location
+#return: none, flushs the page on the param 
 def flushByCacheLocation(i):
     global cache
     printt("checking if the page has a relevant log entry")
@@ -121,6 +137,7 @@ def flushByCacheLocation(i):
     json.dump(page, open('./stablestorage/'+ str(cache[i]["page"]["id"]),"w+"))
     printt("writing was completed")
 
+#Checkpoint
 def checkpoint():
     global sequence
     global MasterRecord
@@ -139,6 +156,8 @@ def checkpoint():
     sequence+=1
     printt("checkpoint finished")
 
+#param: page id
+#return none, but flush a page with param to disk
 def flush(pageid):
     for i in range(0,3):
         if(cache[i]["page"]["id"]==pageid):
@@ -147,6 +166,7 @@ def flush(pageid):
     printt("The cache has no page="+str(pageid))
     return
 
+#force
 def force():
     global logBuffer
     stab=readLogStable()
@@ -160,10 +180,12 @@ def force():
         printt("writing log entry with params " + str(log))
         json.dump(log, open('./stablestorage/stablelog',"a+"))
     printt("finished writing logBuffer to stable log")
-    #logBuffer=[]
+    if(forceDeleteLogBuffer=True):
+        logBuffer=[]
     printt("force completed")
 
-
+#param: transaction id
+#return: none, but commit the tranaction with param
 def commit(tid):
     global sequence
     global activetrans
@@ -180,6 +202,9 @@ def commit(tid):
     sequence+=1
     printt("commit finished")
 
+
+#param transaction id
+#return none, but creates begin log
 def begin(tid):
     global sequence
     printt("adding trans=" + str(tid) + "activetrans")
@@ -208,6 +233,9 @@ def LRU():
         if(cache[i]["cacheCounter"]==minimum):
             printt("least used page is in cache pag i="+ str(i))
             return i
+    
+#param transaction id, page id, length of value, offset from where to start, value string to put
+# return none, but writing to cache page with  page id the new value starting from offset and new log entry 
 
 def write(tid,id,length,offset,value,flag=1):
     print("write "+ str(value))
@@ -231,7 +259,10 @@ def write(tid,id,length,offset,value,flag=1):
         printt("page on cache at i=" + str(cached))
     printt("change content and psn")
     old_value=''
+    print("offset is: " + str(offset) + " offset + length is: " + str(length))
     for i in range(offset,offset+length):
+        print("value is: " + value)
+        print("i is: " +str(i) + "i-offset is:" + str(i-offset))
         old_value=old_value+str(cache[cached]["page"]["content"][i])
         print("value char: "+ str(value[i-offset]))
         cache[cached]["page"]["content"][i]=value[i-offset]
@@ -256,12 +287,15 @@ def checkLSNofTrans(tid):
             return tran["lsn"]
     return -1
 
+#param tranaction id
+#return the last sequence elavnt to the tranaction 
 def checkLSNofTrans(tid):
     for tran in activetrans:
         if(tran["tid"]==tid):
             return tran["lsn"]
     return -1
 
+#function used for printing massages and showing variable while runing
 def printt(string=None):
     global jumpToNextLine
     if(string != None):
@@ -312,10 +346,14 @@ def printt(string=None):
         printt(sequence)
 
           
-        
+
+#param: page id
+# reutrn none, but prints the page as in disk        
 def printStablePage(pageid):
     print(json.load(open('./stablestorage/'+ str(pageid))))
 
+#param: page id
+# reutrn none, but prints the page as in cache or saying it is not on cache  
 def printCachePage(pageid):
     for i in range(0,3):
         if(cache[i]!={}):
@@ -328,6 +366,7 @@ def printCachePage(pageid):
 def createLogEntry():
     pass
 
+#prints the command left on undone on our commands file
 def printCommands():
     global line
     f=open(fileName)
@@ -335,7 +374,7 @@ def printCommands():
     for i in range(line,len(lines)):
         print(lines[i])
 
-
+#reads the commands file and parse it
 def readFile(filepath):
     global line
     global fileName
@@ -360,16 +399,19 @@ def readFile(filepath):
             line += 1
             printt()
 
+#reads the stable from disk to cache (log buffer)
 def readLogStable():
     stablelog=[]
     with open("./stablestorage/stablelog") as fp:
         row = fp.readline()
     parsed=row.split("}")
     for p in parsed[:-1]:
-       temp=json.loads(str(p+"}"))
-       stablelog.append(temp)
+        temp=json.loads(str(p+"}"))
+        stablelog.append(temp)
     return stablelog
 
+
+#redo algo
 def redo():
     global cacheGeneralCounter 
     global cache
@@ -383,8 +425,11 @@ def redo():
         printt("checking if log type is write or compensaton, log type is: " + str(log["actiontype"]) )
         if(log["actiontype"]=="write" or log["actiontype"]=="compensation"):
             printt("log type is "+str(log["actiontype"]) + "  , fetching page")    
-            if(checkPageInCache((log["page"])) == -1):
-               cached=fetch(log["page"])
+            if(checkPageInCache((int(log["page"]))) == -1):
+                print(checkPageInCache((int(log["page"]))))
+                cached=fetch(int(log["page"]))
+            else:
+                cached=checkPageInCache((int(log["page"])))
             printt("page is now on cache page=" +str(cached) + " checking if page sequence is smaller then log sequence")
             if(cache[cached]["page"]["psn"]<log["lsn"]):
                 printt("page sequence is smaller, redo log: checking if compansation or write")
@@ -394,10 +439,12 @@ def redo():
                     cache[cached]["cacheCounter"]=cacheGeneralCounter
                 cache[cached]["page"]["psn"]=log["lsn"]
                 cache[cached]["page"]["status"]="dirty"
-        sequence = log["lsn"]
+        sequence = log["lsn"]+1
     print(str(cache))
     
- 
+
+#param: logentry
+# return none, but create and do reverse to the recived log entry 
 def inverse(logentry):
     printt("starting inverse of log")
     global cache
@@ -422,12 +469,13 @@ def inverse(logentry):
     lastpsn=cache[cached]["page"]["psn"]
     cache[cached]["page"]["psn"]=sequence   
     cache[cached]["page"]["status"]="dirty"
-    logentry={"lsn": sequence, "actiontype":"compensation","NextUndoSeqNo":logentry["PreviousSN"],"page":logentry["page"],"offset":logentry["offset"],"value":logentry["value"],"length":logentry["length"]}
+    logentry={"lsn": sequence, "actiontype":"compensation","NextUndoSeqNo":logentry["PreviousSN"],"page":logentry["page"],"offset":logentry["offset"],"value":logentry["oldValue"],"length":logentry["length"]}
     logBuffer.append(logentry)
     sequence+=1
     printt("compansisiton finished" + str(logentry))
     printt(str(cache))
 
+#undo
 def undo():
     printt('undo begin!')
     global sequence
@@ -484,6 +532,8 @@ def undo():
             sequence+=1
             force()
 
+#get a list of losers tranactions id
+#return the trancaction with maximum sequnce, and maximum sequnce
 def findMaxSeq_InLosers(loser): 
     LastSeqNo=-1
     LastSeqNo_tid=-1
@@ -492,7 +542,8 @@ def findMaxSeq_InLosers(loser):
             LastSeqNo_tid = int(los[0])
             LastSeqNo = int(los[1])
     return LastSeqNo_tid, LastSeqNo
-
+#param, array of losers transaction id
+#return the index of losers with value as param 
 def findIndex_InLosers(loser,tid):
     counter=0
     for los in loser:
@@ -500,21 +551,24 @@ def findIndex_InLosers(loser,tid):
             return counter
         counter+=1
     return -1
+#controling function used for demonstrate easy
 def startFunction():
     global line
+    global forceDeleteLogBuffer
     print("Enter f if it is 'First Use'     or       r if it is 'Recover Mode'")
     read=input()
     if(read == "f"):
         createStableStorage()
-        readFile("SENARIO2.txt")
+        readFile("SENARIO3.txt")
     else:
+        forceDeleteLogBuffer=False
         redo()
         line+=1
         printt('redo finished!')
         undo()
         line+=1
         printt('    Recover Completed!!')
-        
+        forceDeleteLogBuffer=True
 
 startFunction()
 
